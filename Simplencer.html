@@ -47,6 +47,7 @@ button.m.on{background:#c33;color:#fff;border-color:#c33}
  <button id="play">&#9654; Play</button>
  <button id="clrall" title="Clear all gates and ties on every channel">Clear all</button>
  <label>BPM <span><input id="bpm" type="range" min="40" max="240" value="110" style="width:130px"> <span id="bpmv" class="v"></span></span></label>
+ <label>Swing <span><input id="sw" type="range" min="50" max="75" value="50" style="width:100px"> <span id="swv" class="v">50%</span></span></label>
  <label>Scale <select id="scale"></select></label>
  <label>Root <select id="root"></select></label>
  <label>MIDI out <select id="mout"><option value="">None (internal only)</option></select></label>
@@ -85,14 +86,14 @@ const VT={
  ep:{n:'FM e-piano',o:[['sine',0,1]],fm:[14,1.1,.05],f:5000,q:.5,a:.002,d:.7,s:.15,r:.25,fe:0}
 };
 const mk=o=>Object.assign({dest:'int',voice:'saw',oct:2,len:16,nl:.5,div:1,nxt:0,vol:.8,mute:false,vals:Array(N).fill(0),gate:Array(N).fill(true),tie:Array(N).fill(false),pos:-1,open:false,cur:null,offAt:0,am:null},o);
-const S={bpm:110,scale:'Minor',root:0,out:null,play:false,chs:[
+const S={swing:.5,bpm:110,scale:'Minor',root:0,out:null,play:false,chs:[
  mk({voice:'saw',oct:2,nl:.55,vals:[0,2,4,2,5,4,2,0,0,2,4,7,5,4,2,1]}),
  mk({voice:'pluck',oct:3,nl:.4,dest:'int',vals:[7,0,4,0,7,0,9,0,7,0,4,0,9,0,11,0],gate:[1,0,1,0,1,0,1,1,1,0,1,0,1,0,1,1].map(Boolean)}),
  mk({voice:'pad',oct:1,len:8,nl:3.6,vals:[0,0,0,0,3,3,3,3,0,0,0,0,3,3,3,3],gate:[1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0].map(Boolean)}),
  mk({voice:'drone',oct:0,nl:16,vals:[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],gate:[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0].map(Boolean)})
 ]};
 S.chs.forEach(c=>c.oct+=2);
-const save=()=>{try{localStorage.setItem('seq4',JSON.stringify({v:2,bpm:S.bpm,scale:S.scale,root:S.root,chs:S.chs.map(c=>({dest:c.dest,voice:c.voice,oct:c.oct,len:c.len,nl:c.nl,div:c.div,vol:c.vol,mute:c.mute,vals:c.vals,gate:c.gate,tie:c.tie}))}))}catch(e){}};
+const save=()=>{try{localStorage.setItem('seq4',JSON.stringify({v:2,swing:S.swing,bpm:S.bpm,scale:S.scale,root:S.root,chs:S.chs.map(c=>({dest:c.dest,voice:c.voice,oct:c.oct,len:c.len,nl:c.nl,div:c.div,vol:c.vol,mute:c.mute,vals:c.vals,gate:c.gate,tie:c.tie}))}))}catch(e){}};
 const $=id=>document.getElementById(id);
 const E=(t,p={},k=[])=>{const e=document.createElement(t);Object.assign(e,p);k.forEach(x=>e.append(x));return e};
 const nm=m=>NM[m%12]+(Math.floor(m/12)-1);
@@ -143,8 +144,8 @@ function stepCh(ch,i,t){
  if(ch.tie[p]&&ch.gate[nx]){ch.open=true;ch.offAt=Infinity}
  else{ch.open=false;ch.offAt=t+ch.nl*sd;off(ch,'v',m,ch.offAt)}
 }
-function tick(){const c=A();S.chs.forEach((ch,i)=>{while(ch.nxt<c.currentTime+.12){stepCh(ch,i,ch.nxt);ch.nxt+=60/S.bpm/4*ch.div}})}
-function start(){A();S.chs.forEach(c=>{c.pos=-1;c.open=false;c.cur=null;c.offAt=0;c.nxt=ctx.currentTime+.06});timer=setInterval(tick,25);S.play=true;$('play').classList.add('on');$('play').innerHTML='&#9632; Stop'}
+function tick(){const c=A();S.chs.forEach((ch,i)=>{while(ch.nxt<c.currentTime+.12){const sd=60/S.bpm/4*ch.div;stepCh(ch,i,ch.nxt+((ch.k++&1)?(2*S.swing-1)*sd:0));ch.nxt+=sd}})}
+function start(){A();S.chs.forEach(c=>{c.pos=-1;c.open=false;c.cur=null;c.offAt=0;c.k=0;c.nxt=ctx.currentTime+.06});timer=setInterval(tick,25);S.play=true;$('play').classList.add('on');$('play').innerHTML='&#9632; Stop'}
 function stop(){clearInterval(timer);S.play=false;S.chs.forEach(silence);Q.length=0;$('play').classList.remove('on');$('play').innerHTML='&#9654; Play';document.querySelectorAll('.st.play').forEach(e=>e.classList.remove('play'))}
 $('play').onclick=()=>S.play?stop():start();
 $('clrall').onclick=()=>{S.chs.forEach(c=>{c.gate.fill(false);c.tie.fill(false)});refreshAll();save()};
@@ -205,7 +206,8 @@ NM.forEach((n,k)=>$('root').append(E('option',{value:k,textContent:n})));$('root
 $('root').onchange=()=>{S.root=+$('root').value;refreshAll();save()};
 $('bpm').value=S.bpm;$('bpmv').textContent=S.bpm;
 $('bpm').oninput=()=>{S.bpm=+$('bpm').value;$('bpmv').textContent=S.bpm;save()};
-function syncTop(){$('scale').value=S.scale;$('root').value=S.root;$('bpm').value=S.bpm;$('bpmv').textContent=S.bpm}
+$('sw').oninput=()=>{S.swing=$('sw').value/100;$('swv').textContent=$('sw').value+'%';save()};
+function syncTop(){$('scale').value=S.scale;$('root').value=S.root;$('bpm').value=S.bpm;$('bpmv').textContent=S.bpm;$('sw').value=Math.round(S.swing*100);$('swv').textContent=Math.round(S.swing*100)+'%'}
 let MA=null;
 function fillOuts(){const cur=$('mout').value;$('mout').length=1;if(!MA)return;let n=0;MA.outputs.forEach(o=>{$('mout').append(E('option',{value:o.id,textContent:o.name}));n++});
  $('mout').value=[...$('mout').options].some(o=>o.value===cur)?cur:'';S.out=MA.outputs.get($('mout').value)||null;$('ms').textContent=n+' MIDI output'+(n===1?'':'s')}
@@ -216,8 +218,8 @@ else $('ms').textContent='Web MIDI not supported (use Chrome/Edge)';
 (function raf(){if(ctx){while(Q.length&&Q[0].t<=ctx.currentTime){const q=Q.shift();els[q.i].forEach(e=>e.root.classList.remove('play'));els[q.i][q.p].root.classList.add('play')}}requestAnimationFrame(raf)})();
 /* ---- patterns, presets, files ---- */
 const PPQ=480;
-function getState(){return{v:2,bpm:S.bpm,scale:S.scale,root:S.root,chs:S.chs.map(c=>({dest:c.dest,voice:c.voice,oct:c.oct,len:c.len,nl:c.nl,div:c.div,vol:c.vol,mute:c.mute,vals:c.vals.slice(),gate:c.gate.slice(),tie:c.tie.slice()}))}}
-function setState(j){S.bpm=j.bpm||110;S.scale=SC[j.scale]?j.scale:'Minor';S.root=j.root||0;
+function getState(){return{v:2,swing:S.swing,bpm:S.bpm,scale:S.scale,root:S.root,chs:S.chs.map(c=>({dest:c.dest,voice:c.voice,oct:c.oct,len:c.len,nl:c.nl,div:c.div,vol:c.vol,mute:c.mute,vals:c.vals.slice(),gate:c.gate.slice(),tie:c.tie.slice()}))}}
+function setState(j){S.bpm=j.bpm||110;S.swing=j.swing||.5;S.scale=SC[j.scale]?j.scale:'Minor';S.root=j.root||0;
  j.chs.slice(0,4).forEach((c,i)=>{const o=S.chs[i];if(ctx)silence(o);Object.assign(o,c,{oct:Math.max(0,Math.min(7,c.oct+(j.v?0:2))),vals:c.vals.slice(),gate:c.gate.slice(),tie:c.tie.slice(),open:false,cur:null,am:null,pos:-1})});
  syncTop();if(els.length){build();refreshAll();save()}}
 const g_=s=>Array.from({length:N},(_,i)=>s[i%s.length]==='1'),v_=a=>Array.from({length:N},(_,i)=>a[i%a.length]);
@@ -228,15 +230,25 @@ const PR={
  'Four on the floor':{v:2,bpm:124,scale:'Minor pent',root:0,chs:[cd('bass',2,16,1,.5,[0,0,0,0,0,0,3,0,0,0,0,0,0,0,2,0],'0010001000100010'),cd('sq',4,16,1,.25,[0,2,4,3,2,4,1,0,3,2,4,1,0,2,3,4],'1001001010010010'),cd('pluck',5,12,.666667,.5,[0,2,4,7,4,2,0,3,5,3,2,1],'110'),cd('drone',0,1,16,16,[0],'1','1')]},
  'Blank':{v:2,bpm:110,scale:'Minor',root:0,chs:[0,1,2,3].map(i=>cd(['saw','pluck','pad','drone'][i],[3,4,3,1][i],16,1,.5,[0],'0'))}
 };
+const RP={};
 const LS=()=>{try{return JSON.parse(localStorage.getItem('seq4slots'))||{}}catch(e){return{}}};
 const msg=t=>{$('msg').textContent=t;clearTimeout(msg.t);msg.t=setTimeout(()=>$('msg').textContent='',5000)};
 function fillPat(sel){const p=$('pat');p.textContent='';p.append(E('option',{value:'',textContent:'Choose…'}));
  Object.keys(PR).forEach(k=>p.append(E('option',{value:'P:'+k,textContent:'Preset: '+k})));
+ Object.keys(RP).forEach(k=>p.append(E('option',{value:'R:'+k,textContent:'Default: '+k})));
  Object.keys(LS()).forEach(k=>p.append(E('option',{value:'S:'+k,textContent:'Saved: '+k})));p.value=sel||''}
-$('pat').onchange=()=>{const v=$('pat').value;if(!v)return;const k=v.slice(2),j=v[0]==='P'?PR[k]:LS()[k];if(j){setState(j);$('pname').value=v[0]==='S'?k:''}};
+$('pat').onchange=()=>{const v=$('pat').value;if(!v)return;const k=v.slice(2),j=v[0]==='P'?PR[k]:v[0]==='R'?RP[k]:LS()[k];if(j){setState(j);$('pname').value=v[0]==='S'?k:''}};
 $('psave').onclick=()=>{const n=($('pname').value||'').trim();if(!n)return msg('Type a name first');const s=LS();s[n]=getState();try{localStorage.setItem('seq4slots',JSON.stringify(s));fillPat('S:'+n);msg('Saved '+n)}catch(e){msg('Could not save')}};
 $('pdel').onclick=()=>{const v=$('pat').value;if(v[0]!=='S')return msg('Select a saved pattern to delete');const s=LS();delete s[v.slice(2)];try{localStorage.setItem('seq4slots',JSON.stringify(s))}catch(e){}fillPat();msg('Deleted')};
 fillPat();
+loadRemote();
+async function loadRemote(){
+ let names=null;
+ try{const r=await fetch('patterns/index.json',{cache:'no-cache'});if(r.ok)names=(await r.json()).map(x=>typeof x==='string'?x:x.file)}catch(e){}
+ if(!names){try{const h=location.hostname,m=h.match(/^(.+)\.github\.io$/);if(m){const sg=location.pathname.split('/')[1],repo=sg&&!sg.includes('.')?sg:h;const r=await fetch('https://api.github.com/repos/'+m[1]+'/'+repo+'/contents/patterns');if(r.ok)names=(await r.json()).filter(f=>/\.json$/i.test(f.name)&&f.name!=='index.json').map(f=>f.name)}}catch(e){}}
+ if(!names)return;
+ for(const f of names){try{const r=await fetch('patterns/'+encodeURIComponent(f));if(r.ok){const j=await r.json();if(j&&Array.isArray(j.chs))RP[f.replace(/\.json$/i,'')]=j}}catch(e){}}
+ fillPat($('pat').value)}
 let DL=null;
 async function getDL(){if(DL)return DL;for(let i=0;i<5&&!(window.claude&&claude.use);i++)await new Promise(r=>setTimeout(r,100));try{DL=window.claude&&claude.use?await claude.use('downloads'):null}catch(e){}return DL}
 const saveFile=async(n,d)=>{const D=await getDL();if(!D){const u=URL.createObjectURL(new Blob([d])),a=E('a',{href:u,download:n});document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),4000);return msg('Downloaded '+n)}try{await D.save({filename:n,data:d});msg('Saved '+n)}catch(e){msg(e.code==='declined'?'Cancelled':'Save failed ('+(e.code||'error')+')')}};
