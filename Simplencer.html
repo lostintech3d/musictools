@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>4-Channel Analog Step Sequencer with ext midi functionality</title>
+<title>4-Channel Analog Step Sequencer</title>
 <style>
 :root{--bg:#eceae4;--pn:#fff;--fg:#1b1b1b;--mu:#6b6b6b;--bd:#cfcbc0;--bar:#dcd8cc;--bt:#f1efe9;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#101113;--pn:#1a1c1f;--fg:#e8e6e1;--mu:#8a8c90;--bd:#2c2f34;--bar:#24272b;--bt:#2a2d32}}
@@ -58,7 +58,7 @@ button.m.on{background:#c33;color:#fff;border-color:#c33}
  <label>Name <input id="pname" type="text" placeholder="my pattern"></label>
  <button id="psave">Save</button><button id="pdel">Delete</button>
  <span style="width:16px"></span>
- <button id="xmid" title="Exports a zip containing a .mid file">Export MIDI</button><button id="xjson">Export JSON</button>
+ <button id="xmid" title="Saves a .mid file (a zip containing it, inside claude.ai)">Export MIDI</button><button id="xjson">Export JSON</button>
  <label>Import .mid / .json <input id="imp" type="file" accept=".mid,.midi,.json"></label>
  <span id="msg" style="color:var(--mu)"></span>
 </div>
@@ -237,10 +237,11 @@ $('pat').onchange=()=>{const v=$('pat').value;if(!v)return;const k=v.slice(2),j=
 $('psave').onclick=()=>{const n=($('pname').value||'').trim();if(!n)return msg('Type a name first');const s=LS();s[n]=getState();try{localStorage.setItem('seq4slots',JSON.stringify(s));fillPat('S:'+n);msg('Saved '+n)}catch(e){msg('Could not save')}};
 $('pdel').onclick=()=>{const v=$('pat').value;if(v[0]!=='S')return msg('Select a saved pattern to delete');const s=LS();delete s[v.slice(2)];try{localStorage.setItem('seq4slots',JSON.stringify(s))}catch(e){}fillPat();msg('Deleted')};
 fillPat();
-let DL=null;try{window.claude&&claude.use('downloads').then(d=>DL=d).catch(()=>{})}catch(e){}
-const saveFile=(n,d)=>DL?DL.save({filename:n,data:d}).then(()=>msg('Saved '+n)).catch(e=>msg(e.code==='declined'?'Cancelled':'Save failed ('+e.code+')')):msg('Downloads are not available in this view');
+let DL=null;
+async function getDL(){if(DL)return DL;for(let i=0;i<5&&!(window.claude&&claude.use);i++)await new Promise(r=>setTimeout(r,100));try{DL=window.claude&&claude.use?await claude.use('downloads'):null}catch(e){}return DL}
+const saveFile=async(n,d)=>{const D=await getDL();if(!D){const u=URL.createObjectURL(new Blob([d])),a=E('a',{href:u,download:n});document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),4000);return msg('Downloaded '+n)}try{await D.save({filename:n,data:d});msg('Saved '+n)}catch(e){msg(e.code==='declined'?'Cancelled':'Save failed ('+(e.code||'error')+')')}};
 $('xjson').onclick=()=>saveFile('sequencer-pattern.json',JSON.stringify(getState()));
-$('xmid').onclick=()=>saveFile('sequencer-midi.zip',zip('sequencer.mid',midiOut()));
+$('xmid').onclick=async()=>{const D=await getDL(),b=midiOut();D?saveFile('sequencer-midi.zip',zip('sequencer.mid',b)):saveFile('sequencer.mid',b)};
 function crc(b){let r=-1;for(let i=0;i<b.length;i++){r^=b[i];for(let k=0;k<8;k++)r=r&1?(r>>>1)^0xEDB88320:r>>>1}return(r^-1)>>>0}
 function zip(n,d){const nb=new TextEncoder().encode(n),c=crc(d),L=30+nb.length,C=46+nb.length,q=L+d.length,o=new Uint8Array(q+C+22),v=new DataView(o.buffer);
  v.setUint32(0,0x04034b50,true);v.setUint16(4,20,true);v.setUint16(12,33,true);v.setUint32(14,c,true);v.setUint32(18,d.length,true);v.setUint32(22,d.length,true);v.setUint16(26,nb.length,true);o.set(nb,30);o.set(d,L);
