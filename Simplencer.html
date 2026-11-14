@@ -556,5 +556,31 @@ function openMidiRec(){const ed=$('ed'),pn=$('edp');pn.textContent='';const ins=
   E('p',{style:'color:var(--mu);margin:10px 0 0;max-width:640px',textContent:'While playing, each note lands on the nearest step of the playing variant for that track. When stopped, notes fill steps one after another from step 1 of the variant shown. Notes snap to the current scale, so set the track octave to match your keyboard range.'}));
  ed.style.display='flex'}
 $('mrec').onclick=openMidiRec;
+/* ---- glitch-free capture (audio thread) ---- */
+function capReady(){if(capReady.p)return capReady.p;capReady.p=(async()=>{try{if(!ctx.audioWorklet)return false;
+ const src=`class Cap extends AudioWorkletProcessor{constructor(){super();this.b=[];this.n=0;this.t=0}process(inp){const i=inp[0];if(i&&i.length&&i[0].length){if(!this.n)this.t=currentTime;this.b.push(i.map(c=>c.slice()));this.n+=i[0].length;if(this.n>=4096){this.port.postMessage({t:this.t,b:this.b});this.b=[];this.n=0}}return true}}registerProcessor('cap',Cap);`;
+ await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([src],{type:'application/javascript'})));return true}catch(e){return false}})();return capReady.p}
+async function makeCap(nin,cb,disc){
+ if(await capReady()){const n=new AudioWorkletNode(ctx,'cap',{numberOfInputs:1,numberOfOutputs:1,channelCount:nin,channelCountMode:'explicit',channelInterpretation:disc?'discrete':'speakers',outputChannelCount:[1]});n.port.onmessage=e=>cb(e.data.t,e.data.b);return n}
+ const p=ctx.createScriptProcessor(4096,nin,1);p.channelCountMode='explicit';p.channelInterpretation=disc?'discrete':'speakers';
+ p.onaudioprocess=e=>{const b=e.inputBuffer,a=[];for(let k=0;k<b.numberOfChannels;k++)a.push(b.getChannelData(k).slice());cb(e.playbackTime-b.length/ctx.sampleRate,[a])};return p}
+async function startRec(){
+ const arm=S.chs.map((c,i)=>({c,i})).filter(x=>x.c.arm);if(!arm.length)return msg('Arm at least one track first');
+ if(S.play)stop();A();
+ R={recs:[],nodes:[],streams:[],seq:0,z:null,to:0};const rr=R;
+ const zero=()=>{if(!rr.z){rr.z=ctx.createGain();rr.z.gain.value=0;rr.z.connect(ctx.destination)}return rr.z};
+ const by={};
+ for(const{c,i}of arm){const v=srcOf(c,i),rec={c,chunks:[],t1:null};
+  if(v==='tap'){rec.chunks=[[],[]];const n=await makeCap(2,(t,bl)=>{if(rec.t1==null)rec.t1=t;bl.forEach(b=>{rec.chunks[0].push(b[0]);rec.chunks[1].push(b.length>1?b[1]:b[0])})},false);bus(c).connect(n);n.connect(zero());rr.nodes.push(n)}
+  else{const q=v.split('@@'),id=q.length>1?q[0]:$('ain').value,cs=q[q.length-1];rec.idx=cs.split('').map(x=>+x-1);rec.chunks=rec.idx.map(()=>[]);(by[id]=by[id]||[]).push(rec)}
+  rr.recs.push(rec)}
+ for(const id of Object.keys(by)){const recs=by[id];let stream;
+  try{stream=await getStream(id)}catch(e){rr.nodes.forEach(n=>{try{n.disconnect()}catch(x){}});rr.streams.forEach(s=>s.getTracks().forEach(t=>t.stop()));R=null;return msg('Could not open audio input ('+e.name+')')}
+  rr.streams.push(stream);const st=stream.getAudioTracks()[0].getSettings(),nin=Math.max(1,st.channelCount||2),need=Math.max(...recs.flatMap(r=>r.idx))+1;
+  if(need>nin)msg('That input exposes only '+nin+' channel(s); higher inputs will record silence');
+  const src=ctx.createMediaStreamSource(stream),n=await makeCap(nin,(t,bl)=>{recs.forEach(r=>{if(r.t1==null)r.t1=t;bl.forEach(b=>r.idx.forEach((k,j)=>r.chunks[j].push(k<b.length?b[k]:new Float32Array(b[0].length))))})},true);
+  src.connect(n);n.connect(zero());rr.nodes.push(n,src)}
+ S.rec=true;start();rr.seq=S.chs[0].nxt;$('rec').textContent='\u25a0 Stop rec';$('rec').classList.add('on');msg('Recording\u2026');
+ const nb=+$('abars').value;if(nb>0)rr.to=setTimeout(()=>{if(S.rec)stop()},nb*4*60/S.bpm*1000)}
 refreshAll();
 </script></body></html>
