@@ -582,5 +582,38 @@ async function startRec(){
   src.connect(n);n.connect(zero());rr.nodes.push(n,src)}
  S.rec=true;start();rr.seq=S.chs[0].nxt;$('rec').textContent='\u25a0 Stop rec';$('rec').classList.add('on');msg('Recording\u2026');
  const nb=+$('abars').value;if(nb>0)rr.to=setTimeout(()=>{if(S.rec)stop()},nb*4*60/S.bpm*1000)}
+/* ---- capture straight from the device clock (no resampling to the output clock) ---- */
+function capStream(stream,cb){const tr=stream.getAudioTracks()[0];if(typeof MediaStreamTrackProcessor==='undefined'||!tr)return null;
+ const rd=new MediaStreamTrackProcessor({track:tr}).readable.getReader();let alive=true;
+ (async()=>{try{while(alive){const{value:a,done}=await rd.read();if(done)break;const n=a.numberOfFrames,bl=[];for(let k=0;k<a.numberOfChannels;k++){const f=new Float32Array(n);a.copyTo(f,{planeIndex:k,format:'f32-planar'});bl.push(f)}const perf=performance.now(),sr=a.sampleRate;a.close();cb(perf,sr,n,[bl])}}catch(e){}})();
+ return{stop(){alive=false;try{rd.cancel()}catch(e){}}}}
+async function startRec(){
+ const arm=S.chs.map((c,i)=>({c,i})).filter(x=>x.c.arm);if(!arm.length)return msg('Arm at least one track first');
+ if(S.play)stop();A();
+ R={recs:[],nodes:[],streams:[],stops:[],seq:0,z:null,to:0};const rr=R;
+ const zero=()=>{if(!rr.z){rr.z=ctx.createGain();rr.z.gain.value=0;rr.z.connect(ctx.destination)}return rr.z};
+ const by={};
+ for(const{c,i}of arm){const v=srcOf(c,i),rec={c,chunks:[],t1:null};
+  if(v==='tap'){rec.chunks=[[],[]];const n=await makeCap(2,(t,bl)=>{if(rec.t1==null)rec.t1=t;bl.forEach(b=>{rec.chunks[0].push(b[0]);rec.chunks[1].push(b.length>1?b[1]:b[0])})},false);bus(c).connect(n);n.connect(zero());rr.nodes.push(n)}
+  else{const q=v.split('@@'),id=q.length>1?q[0]:$('ain').value,cs=q[q.length-1];rec.idx=cs.split('').map(x=>+x-1);rec.chunks=rec.idx.map(()=>[]);(by[id]=by[id]||[]).push(rec)}
+  rr.recs.push(rec)}
+ for(const id of Object.keys(by)){const recs=by[id];let stream;
+  try{stream=await getStream(id)}catch(e){rr.stops.forEach(s=>s.stop());rr.nodes.forEach(n=>{try{n.disconnect()}catch(x){}});rr.streams.forEach(s=>s.getTracks().forEach(t=>t.stop()));R=null;return msg('Could not open audio input ('+e.name+')')}
+  rr.streams.push(stream);const st=stream.getAudioTracks()[0].getSettings(),nin=Math.max(1,st.channelCount||2),need=Math.max(...recs.flatMap(r=>r.idx))+1;
+  if(need>nin)msg('That input exposes only '+nin+' channel(s); higher inputs will record silence');
+  const cp=capStream(stream,(perf,sr,n,blocks)=>{recs.forEach(r=>{if(r.t1==null){const o=ctx.getOutputTimestamp();r.t1=o.contextTime+(perf-o.performanceTime)/1000-n/sr;r.sr=sr}blocks.forEach(b=>r.idx.forEach((k,j)=>r.chunks[j].push(k<b.length?b[k]:new Float32Array(n))))})});
+  if(cp)rr.stops.push(cp);
+  else{const src=ctx.createMediaStreamSource(stream),n=await makeCap(nin,(t,bl)=>{recs.forEach(r=>{if(r.t1==null)r.t1=t;bl.forEach(b=>r.idx.forEach((k,j)=>r.chunks[j].push(k<b.length?b[k]:new Float32Array(b[0].length))))})},true);src.connect(n);n.connect(zero());rr.nodes.push(n,src)}}
+ S.rec=true;start();rr.seq=S.chs[0].nxt;$('rec').textContent='\u25a0 Stop rec';$('rec').classList.add('on');msg('Recording\u2026');
+ const nb=+$('abars').value;if(nb>0)rr.to=setTimeout(()=>{if(S.rec)stop()},nb*4*60/S.bpm*1000)}
+function finishRec(r){(r.stops||[]).forEach(s=>s.stop());r.nodes.forEach(n=>{try{n.disconnect()}catch(e){}});(r.streams||[]).forEach(s=>s.getTracks().forEach(t=>t.stop()));
+ r.recs.forEach(x=>{const d=x.chunks.map(cs=>{const n=cs.reduce((a,b)=>a+b.length,0),o=new Float32Array(n);let p=0;cs.forEach(b=>{o.set(b,p);p+=b.length});return o});
+  if(d[0]&&d[0].length&&x.t1!=null){x.c.take={sr:x.sr||ctx.sampleRate,d,lead:r.seq-x.t1};if(x.c.tl)x.c.tl.textContent=takeTxt(x.c)}});
+ if(R===r){R=null;$('rec').textContent='\u25cf Record';$('rec').classList.remove('on')}msg('Recording finished')}
+async function mixBuf(){const T=S.chs.filter(c=>c.take&&!c.mm);if(!T.length)return null;
+ const A_=T.map(c=>({c,a:align(c)})),sr=T[0].take.sr,dur=Math.max(...A_.map(x=>x.a[0].length/x.c.take.sr)),oc=new OfflineAudioContext(2,Math.max(1,Math.ceil(dur*sr)),sr);
+ A_.forEach(({c,a})=>{const b=oc.createBuffer(a.length,a[0].length,c.take.sr);a.forEach((x,k)=>b.copyToChannel(x,k));const s=oc.createBufferSource(),g=oc.createGain(),p=oc.createStereoPanner();s.buffer=b;g.gain.value=c.mixv;p.pan.value=c.pan;s.connect(g).connect(p).connect(oc.destination);s.start(0)});
+ const rb=await oc.startRendering();let pk=0;for(let k=0;k<2;k++){const d=rb.getChannelData(k);for(let i=0;i<d.length;i++){const v=Math.abs(d[i]);if(v>pk)pk=v}}
+ if(pk>1e-4){const g=.891/pk;for(let k=0;k<2;k++){const d=rb.getChannelData(k);for(let i=0;i<d.length;i++)d[i]*=g}}return rb}
 refreshAll();
 </script></body></html>
