@@ -520,7 +520,7 @@ function finishRec(r){r.nodes.forEach(n=>{try{n.disconnect()}catch(e){}});(r.str
 /* ---- level meters and MIDI record ---- */
 var MON={},MON_BUSY=false,MR={on:false,tr:0,ch:-1,inp:''};
 const srcOf=(c,i)=>{let v=c.rin||'auto';if(v==='auto')v=c.dest==='int'?'tap':String(i+1);return v};
-async function syncMon(){if(MON_BUSY){MON_BUSY=2;return}MON_BUSY=true;
+async function syncMon(){if(R)return;if(MON_BUSY){MON_BUSY=2;return}MON_BUSY=true;
  try{A();const want={};
   S.chs.forEach((c,i)=>{c.mon=null;if(!c.arm)return;const v=srcOf(c,i);
    if(v==='tap'){if(!c.tapAn){c.tapAn=ctx.createAnalyser();c.tapAn.fftSize=1024;bus(c).connect(c.tapAn)}c.mon={tap:true}}
@@ -530,8 +530,8 @@ async function syncMon(){if(MON_BUSY){MON_BUSY=2;return}MON_BUSY=true;
   for(const id of Object.keys(want))if(!MON[id]){try{const stream=await getStream(id),nin=Math.max(1,stream.getAudioTracks()[0].getSettings().channelCount||2),src=ctx.createMediaStreamSource(stream),sp=ctx.createChannelSplitter(nin),an=[];for(let k=0;k<nin;k++){const a=ctx.createAnalyser();a.fftSize=1024;sp.connect(a,k);an.push(a)}src.connect(sp);MON[id]={stream,src,an}}catch(e){msg('Meter: could not open input ('+e.name+')')}}
  }finally{const again=MON_BUSY===2;MON_BUSY=false;if(again)syncMon()}}
 const MB=new Float32Array(1024);
-(function mloop(){S.chs.forEach(c=>{if(!c.mt)return;let p=0;const m=c.arm&&c.mon;
-  if(m){const rd=a=>{if(!a)return;a.getFloatTimeDomainData(MB);for(let i=0;i<MB.length;i++){const v=Math.abs(MB[i]);if(v>p)p=v}};
+var MON_T=0;(function mloop(){if(!R&&!MON_BUSY&&performance.now()-MON_T>3000&&S.chs.some(c=>c.arm&&c.mon&&!c.mon.tap&&!MON[c.mon.id])){MON_T=performance.now();syncMon()}S.chs.forEach(c=>{if(!c.mt)return;let p=0;const m=c.arm&&c.mon;
+  if(m&&R&&c.recPk!=null&&!m.tap)p=c.recPk;else if(m){const rd=a=>{if(!a)return;a.getFloatTimeDomainData(MB);for(let i=0;i<MB.length;i++){const v=Math.abs(MB[i]);if(v>p)p=v}};
    if(m.tap)rd(c.tapAn);else{const d=MON[m.id];if(d)m.idx.forEach(k=>rd(d.an[k]))}}
   c.mp=Math.max(p,(c.mp||0)*.94);const db=c.mp>0?20*Math.log10(c.mp):-90,f=Math.max(0,Math.min(1,(db+60)/60)),bar=c.mt.firstChild;
   bar.style.width=(f*100)+'%';bar.style.background=db>-1?'#d33':db>-9?'#e8a020':'#3a3'});requestAnimationFrame(mloop)})();
@@ -598,10 +598,10 @@ async function startRec(){
   else{const q=v.split('@@'),id=q.length>1?q[0]:$('ain').value,cs=q[q.length-1];rec.idx=cs.split('').map(x=>+x-1);rec.chunks=rec.idx.map(()=>[]);(by[id]=by[id]||[]).push(rec)}
   rr.recs.push(rec)}
  for(const id of Object.keys(by)){const recs=by[id];let stream;
-  try{stream=await getStream(id)}catch(e){rr.stops.forEach(s=>s.stop());rr.nodes.forEach(n=>{try{n.disconnect()}catch(x){}});rr.streams.forEach(s=>s.getTracks().forEach(t=>t.stop()));R=null;return msg('Could not open audio input ('+e.name+')')}
+  stopMon();try{stream=await getStream(id)}catch(e){rr.stops.forEach(s=>s.stop());rr.nodes.forEach(n=>{try{n.disconnect()}catch(x){}});rr.streams.forEach(s=>s.getTracks().forEach(t=>t.stop()));R=null;return msg('Could not open audio input ('+e.name+')')}
   rr.streams.push(stream);const st=stream.getAudioTracks()[0].getSettings(),nin=Math.max(1,st.channelCount||2),need=Math.max(...recs.flatMap(r=>r.idx))+1;
   if(need>nin)msg('That input exposes only '+nin+' channel(s); higher inputs will record silence');
-  const cp=capStream(stream,(perf,sr,n,blocks)=>{recs.forEach(r=>{if(r.t1==null){const o=ctx.getOutputTimestamp();r.t1=o.contextTime+(perf-o.performanceTime)/1000-n/sr;r.sr=sr}blocks.forEach(b=>r.idx.forEach((k,j)=>r.chunks[j].push(k<b.length?b[k]:new Float32Array(n))))})});
+  const cp=capStream(stream,(perf,sr,n,blocks)=>{recs.forEach(r=>{if(r.t1==null){const o=ctx.getOutputTimestamp();r.t1=o.contextTime+(perf-o.performanceTime)/1000-n/sr;r.sr=sr}blocks.forEach(b=>r.idx.forEach((k,j)=>r.chunks[j].push(k<b.length?b[k]:new Float32Array(n))));let pk=0;blocks.forEach(b=>r.idx.forEach(k=>{const a=b[k];if(a)for(let i=0;i<a.length;i++){const v=Math.abs(a[i]);if(v>pk)pk=v}}));r.c.recPk=pk})});
   if(cp)rr.stops.push(cp);
   else{const src=ctx.createMediaStreamSource(stream),n=await makeCap(nin,(t,bl)=>{recs.forEach(r=>{if(r.t1==null)r.t1=t;bl.forEach(b=>r.idx.forEach((k,j)=>r.chunks[j].push(k<b.length?b[k]:new Float32Array(b[0].length))))})},true);src.connect(n);n.connect(zero());rr.nodes.push(n,src)}}
  S.rec=true;start();rr.seq=S.chs[0].nxt;$('rec').textContent='\u25a0 Stop rec';$('rec').classList.add('on');msg('Recording\u2026');
@@ -615,5 +615,6 @@ async function mixBuf(){const T=S.chs.filter(c=>c.take&&!c.mm);if(!T.length)retu
  A_.forEach(({c,a})=>{const b=oc.createBuffer(a.length,a[0].length,c.take.sr);a.forEach((x,k)=>b.copyToChannel(x,k));const s=oc.createBufferSource(),g=oc.createGain(),p=oc.createStereoPanner();s.buffer=b;g.gain.value=c.mixv;p.pan.value=c.pan;s.connect(g).connect(p).connect(oc.destination);s.start(0)});
  const rb=await oc.startRendering();let pk=0;for(let k=0;k<2;k++){const d=rb.getChannelData(k);for(let i=0;i<d.length;i++){const v=Math.abs(d[i]);if(v>pk)pk=v}}
  if(pk>1e-4){const g=.891/pk;for(let k=0;k<2;k++){const d=rb.getChannelData(k);for(let i=0;i<d.length;i++)d[i]*=g}}return rb}
+function stopMon(){for(const id of Object.keys(MON)){MON[id].stream.getTracks().forEach(t=>t.stop());try{MON[id].src.disconnect()}catch(e){}delete MON[id]}}
 refreshAll();
 </script></body></html>
